@@ -1,0 +1,14 @@
+{
+  "listen": ":9090",
+  "api_key": "",
+  "cli": {
+    "command": "qwen",
+    "args": ["--approval-mode=yolo"],
+    "workspace": "c:/Users/Cui/.picoclaw/qwen-ws"
+  },
+  "model": "qwen-cli/qwen-max",
+  "cors": {
+    "allowed_origins": ["*"]
+  },
+  "allow_origins": []
+}
