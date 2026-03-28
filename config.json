@@ -4,7 +4,7 @@
   "cli": {
     "command": "qwen",
     "args": ["--approval-mode=yolo"],
-    "workspace": "c:/Users/Cui/.picoclaw/qwen-ws"
+    "workspace": "~/.picoclaw/qwen-ws"
   },
   "model": "qwen-cli/qwen-max",
   "cors": {

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -12,10 +13,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// PromptSession is satisfied by both acp.Session (qwen) and acp.OpenCodeSession.
+type PromptSession interface {
+	Prompt(ctx context.Context, prompt string, onChunk func(string)) (string, error)
+	Close() error
+}
+
 // Server represents the HTTP server
 type Server struct {
 	cfg     *config.Config
-	session *acp.Session
+	session PromptSession
 	engine  *gin.Engine
 }
 
@@ -25,9 +32,14 @@ func New(cfg *config.Config) (*Server, error) {
 		cfg: cfg,
 	}
 
-	// Initialize ACP session
+	// Initialize session driver based on config.
 	var err error
-	s.session, err = acp.NewSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace)
+	switch strings.ToLower(cfg.Driver) {
+	case "opencode":
+		s.session, err = acp.NewOpenCodeSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace)
+	default: // "qwen" or empty
+		s.session, err = acp.NewSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace)
+	}
 	if err != nil {
 		return nil, err
 	}

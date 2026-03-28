@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -17,16 +19,18 @@ import (
 
 // Session represents an ACP session
 type Session struct {
-	mu          sync.Mutex
-	cmd         *exec.Cmd
-	stdin       io.WriteCloser
-	stdout      io.ReadCloser
-	sessionID   string
-	workspace   string
-	requestID   int64
-	done        chan struct{}
+	mu            sync.Mutex
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	reader        *bufio.Reader
+	sessionID     string
+	workspace     string
+	requestID     int64
+	done          chan struct{}
+	closeOnce     sync.Once
 	notifications chan *Notification
-	err         error
+	pending       map[int64]chan *Envelope
+	err           error
 }
 
 // NewSession creates a new ACP session
@@ -35,11 +39,15 @@ func NewSession(command string, args []string, workspace string) (*Session, erro
 		workspace:     workspace,
 		done:          make(chan struct{}),
 		notifications: make(chan *Notification, 100),
+		pending:       make(map[int64]chan *Envelope),
 	}
 
 	if err := s.startProcess(command, args); err != nil {
 		return nil, fmt.Errorf("failed to start process: %w", err)
 	}
+
+	// Start reading responses before handshake so sendRequest can work
+	go s.readLoop()
 
 	// Initialize ACP protocol
 	if err := s.initialize(); err != nil {
@@ -53,14 +61,21 @@ func NewSession(command string, args []string, workspace string) (*Session, erro
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 
-	// Start reading responses
-	go s.readLoop()
-
 	return s, nil
 }
 
 // startProcess starts the ACP CLI process
 func (s *Session) startProcess(command string, args []string) error {
+	// Expand ~ in workspace path
+	workspace := s.workspace
+	if strings.HasPrefix(workspace, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			workspace = filepath.Join(home, workspace[2:])
+		}
+	}
+	s.workspace = workspace
+
 	// Build full command with --acp flag
 	allArgs := append([]string{}, args...)
 	allArgs = append(allArgs, "--acp")
@@ -83,9 +98,11 @@ func (s *Session) startProcess(command string, args []string) error {
 		"QWEN_CODE_TELEMETRY=0",
 	)
 
-	// Set workspace as cwd if specified
+	// Set workspace as cwd if specified; create it if needed
 	if s.workspace != "" {
-		s.cmd.Dir = s.workspace
+		if err := os.MkdirAll(s.workspace, 0750); err == nil {
+			s.cmd.Dir = s.workspace
+		}
 	}
 
 	var err error
@@ -94,10 +111,11 @@ func (s *Session) startProcess(command string, args []string) error {
 		return fmt.Errorf("failed to get stdin pipe: %w", err)
 	}
 
-	s.stdout, err = s.cmd.StdoutPipe()
+	stdout, err := s.cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
+	s.reader = bufio.NewReader(stdout)
 
 	// Capture stderr for debugging
 	stderr, err := s.cmd.StderrPipe()
@@ -107,8 +125,8 @@ func (s *Session) startProcess(command string, args []string) error {
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			// Log stderr if needed
-			// fmt.Fprintf(os.Stderr, "[qwen-stderr] %s\n", scanner.Text())
+			// stderr from qwen process — uncomment for debugging:
+			// fmt.Fprintf(os.Stderr, "[qwen] %s\n", scanner.Text())
 		}
 	}()
 
@@ -141,9 +159,6 @@ func (s *Session) initialize() error {
 	if err := s.sendRequest(ctx, "initialize", params, &result); err != nil {
 		return err
 	}
-
-	// Send initialized notification
-	s.sendNotification("notifications/initialized", nil)
 
 	return nil
 }
@@ -187,65 +202,75 @@ func (s *Session) Prompt(ctx context.Context, prompt string, onChunk func(string
 	}
 
 	var parts []string
-	var mu sync.Mutex
+	var partsMu sync.Mutex
 
-	// Set up chunk handler
-	handler := func(chunk string) {
-		mu.Lock()
-		defer mu.Unlock()
-		parts = append(parts, chunk)
-		if onChunk != nil {
-			onChunk(chunk)
+	handleNotif := func(notif *Notification) {
+		if notif.Method == "session/update" {
+			var update Update
+			if err := json.Unmarshal(notif.Params, &update); err != nil {
+				return
+			}
+			// Only capture agent message chunks (not thought chunks or other updates).
+			if update.Update.SessionUpdate == "agent_message_chunk" &&
+				update.Update.Content.Type == "text" &&
+				update.Update.Content.Text != "" {
+				partsMu.Lock()
+				parts = append(parts, update.Update.Content.Text)
+				partsMu.Unlock()
+				if onChunk != nil {
+					onChunk(update.Update.Content.Text)
+				}
+			}
 		}
 	}
 
-	// Subscribe to notifications
-	done := make(chan struct{})
+	// Collect session/update notifications while the request is in flight.
+	collectCtx, stopCollect := context.WithCancel(ctx)
+	collectorDone := make(chan struct{})
 	go func() {
+		defer close(collectorDone)
 		for {
 			select {
-			case <-ctx.Done():
-				return
+			case <-collectCtx.Done():
+				// Drain any buffered notifications before exiting.
+				for {
+					select {
+					case notif := <-s.notifications:
+						handleNotif(notif)
+					default:
+						return
+					}
+				}
 			case <-s.done:
 				return
 			case notif := <-s.notifications:
-				if notif.Method == "session/update" {
-					var update Update
-					if err := json.Unmarshal(notif.Params, &update); err != nil {
-						continue
-					}
-					if update.Content.Type == "text" && update.Content.Text != "" {
-						handler(update.Content.Text)
-					}
-				}
-			case <-done:
-				return
+				handleNotif(notif)
 			}
 		}
 	}()
 
-	// Send prompt request
-	if err := s.sendRequest(ctx, "session/prompt", params, nil); err != nil {
-		close(done)
-		return "", err
-	}
+	// Send prompt request; blocks until the RPC response is received.
+	err := s.sendRequest(ctx, "session/prompt", params, nil)
 
-	// Wait a bit for final chunks
-	select {
-	case <-time.After(500 * time.Millisecond):
-	case <-ctx.Done():
-	}
+	// Allow trailing notifications a brief window to arrive before draining.
+	time.Sleep(200 * time.Millisecond)
+	stopCollect()
+	<-collectorDone
 
-	close(done)
-
-	mu.Lock()
-	defer mu.Unlock()
-	return strings.Join(parts, ""), nil
+	partsMu.Lock()
+	result := strings.Join(parts, "")
+	partsMu.Unlock()
+	return result, err
 }
 
-// sendRequest sends a JSON-RPC request and waits for response
+// sendRequest sends a JSON-RPC request and waits for the response via readLoop.
 func (s *Session) sendRequest(ctx context.Context, method string, params interface{}, result interface{}) error {
 	id := atomic.AddInt64(&s.requestID, 1)
+
+	respChan := make(chan *Envelope, 1)
+	s.mu.Lock()
+	s.pending[id] = respChan
+	s.mu.Unlock()
 
 	req := Envelope{
 		ID:     json.RawMessage(fmt.Sprintf("%d", id)),
@@ -254,40 +279,21 @@ func (s *Session) sendRequest(ctx context.Context, method string, params interfa
 	}
 
 	if err := s.sendEnvelope(req); err != nil {
+		s.mu.Lock()
+		delete(s.pending, id)
+		s.mu.Unlock()
 		return err
 	}
 
-	// Wait for response
-	respChan := make(chan *Envelope, 1)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.done:
-				return
-			case notif := <-s.notifications:
-				_ = notif
-			default:
-				env, err := s.readEnvelope()
-				if err != nil {
-					return
-				}
-				if env.ID != nil && string(env.ID) == fmt.Sprintf("%d", id) {
-					respChan <- env
-					return
-				}
-			}
-		}
-	}()
-
 	select {
 	case <-ctx.Done():
+		s.mu.Lock()
+		delete(s.pending, id)
+		s.mu.Unlock()
 		return ctx.Err()
+	case <-s.done:
+		return fmt.Errorf("session closed")
 	case env := <-respChan:
-		if env == nil {
-			return fmt.Errorf("no response received")
-		}
 		if env.Error != nil {
 			return fmt.Errorf("RPC error %d: %s", env.Error.Code, env.Error.Message)
 		}
@@ -317,38 +323,21 @@ func (s *Session) sendEnvelope(env Envelope) error {
 	return err
 }
 
-// readEnvelope reads a JSON-RPC envelope
-func (s *Session) readEnvelope() (*Envelope, error) {
-	reader := bufio.NewReader(s.stdout)
-	line, err := reader.ReadBytes('\n')
-	if err != nil {
-		return nil, err
-	}
-
-	var env Envelope
-	if err := json.Unmarshal(bytes.TrimSpace(line), &env); err != nil {
-		return nil, err
-	}
-
-	return &env, nil
-}
-
-// readLoop continuously reads from stdout
+// readLoop is the sole reader of stdout; it dispatches responses and notifications.
 func (s *Session) readLoop() {
-	reader := bufio.NewReader(s.stdout)
 	for {
 		select {
 		case <-s.done:
 			return
 		default:
-			line, err := reader.ReadBytes('\n')
+			line, err := s.reader.ReadBytes('\n')
 			if err != nil {
 				if err != io.EOF {
 					s.mu.Lock()
 					s.err = err
 					s.mu.Unlock()
 				}
-				close(s.done)
+				s.closeOnce.Do(func() { close(s.done) })
 				return
 			}
 
@@ -357,11 +346,26 @@ func (s *Session) readLoop() {
 				continue
 			}
 
-			// Handle notifications
-			if env.ID == nil && env.Method != "" {
-				s.notifications <- &Notification{
-					Method: env.Method,
-					Params: env.Params,
+			if env.ID != nil {
+				// It's a response — dispatch to waiting sendRequest caller.
+				var id int64
+				if err := json.Unmarshal(env.ID, &id); err == nil {
+					s.mu.Lock()
+					ch, ok := s.pending[id]
+					if ok {
+						delete(s.pending, id)
+					}
+					s.mu.Unlock()
+					if ok {
+						ch <- &env
+					}
+				}
+			} else if env.Method != "" {
+				// It's a notification.
+				select {
+				case s.notifications <- &Notification{Method: env.Method, Params: env.Params}:
+				default:
+					// Drop if buffer full to avoid blocking readLoop.
 				}
 			}
 		}
@@ -370,7 +374,7 @@ func (s *Session) readLoop() {
 
 // Close closes the session
 func (s *Session) Close() error {
-	close(s.done)
+	s.closeOnce.Do(func() { close(s.done) })
 
 	if s.stdin != nil {
 		s.stdin.Close()
@@ -378,7 +382,6 @@ func (s *Session) Close() error {
 
 	if s.cmd != nil && s.cmd.Process != nil {
 		if runtime.GOOS == "windows" {
-			// Kill process tree on Windows
 			exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", s.cmd.Process.Pid)).Run()
 		} else {
 			s.cmd.Process.Kill()

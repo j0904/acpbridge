@@ -1,0 +1,11 @@
+{
+  "listen": ":9091",
+  "api_key": "",
+  "driver": "opencode",
+  "cli": {
+    "command": "opencode",
+    "args": [],
+    "workspace": "~/.picoclaw/opencode-ws"
+  },
+  "model": "opencode"
+}

@@ -11,12 +11,13 @@ import (
 
 // Config represents the bridge configuration
 type Config struct {
-	Listen       string        `json:"listen"`
-	APIKey       string        `json:"api_key"`
-	CLI          CLICfg        `json:"cli"`
-	Model        string        `json:"model"`
-	CORS         CORSConfig    `json:"cors,omitempty"`
-	AllowOrigins []string      `json:"allow_origins,omitempty"`
+	Listen       string     `json:"listen"`
+	APIKey       string     `json:"api_key"`
+	Driver       string     `json:"driver"` // "qwen" (default) or "opencode"
+	CLI          CLICfg     `json:"cli"`
+	Model        string     `json:"model"`
+	CORS         CORSConfig `json:"cors,omitempty"`
+	AllowOrigins []string   `json:"allow_origins,omitempty"`
 }
 
 // CLICfg represents CLI configuration

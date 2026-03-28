@@ -24,11 +24,17 @@ type Notification struct {
 	Params json.RawMessage `json:"params"`
 }
 
-// Update represents a session update
+// Update represents a session/update notification params.
+// Actual JSON: {"sessionId":"...","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"..."}}}
 type Update struct {
-	ID      string      `json:"id"`
-	Content Content     `json:"content"`
-	Extra   interface{} `json:"extra,omitempty"`
+	SessionID string     `json:"sessionId"`
+	Update    UpdateBody `json:"update"`
+}
+
+// UpdateBody holds the update type and content.
+type UpdateBody struct {
+	SessionUpdate string  `json:"sessionUpdate"`
+	Content       Content `json:"content"`
 }
 
 // Content represents message content
@@ -63,7 +69,7 @@ type InitializeResult struct {
 			EmbeddedContext bool `json:"embeddedContext"`
 		} `json:"promptCapabilities"`
 		Session struct {
-			List  map[string]interface{} `json:"list"`
+			List   map[string]interface{} `json:"list"`
 			Resume map[string]interface{} `json:"resume"`
 		} `json:"sessionCapabilities"`
 	} `json:"agentCapabilities"`
