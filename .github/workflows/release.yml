@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build Windows (amd64)
+        run: GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bridge-acp-windows-amd64.exe ./cmd/bridge-acp
+
+      - name: Build Windows (arm64)
+        run: GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o bridge-acp-windows-arm64.exe ./cmd/bridge-acp
+
+      - name: Build Linux (amd64)
+        run: GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bridge-acp-linux-amd64 ./cmd/bridge-acp
+
+      - name: Build macOS (amd64)
+        run: GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bridge-acp-darwin-amd64 ./cmd/bridge-acp
+
+      - name: Build macOS (arm64)
+        run: GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bridge-acp-darwin-arm64 ./cmd/bridge-acp
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bridge-acp-windows-amd64.exe
+            bridge-acp-windows-arm64.exe
+            bridge-acp-linux-amd64
+            bridge-acp-darwin-amd64
+            bridge-acp-darwin-arm64
+            config.example.json
+          generate_release_notes: true
