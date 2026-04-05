@@ -50,11 +50,14 @@ jobs:
             config.example.json
           generate_release_notes: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -69,15 +72,18 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=raw,value=latest
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
 
       - name: Extract Docker metadata (opencode)
         id: meta-opencode
@@ -88,13 +94,16 @@ jobs:
             type=semver,pattern={{version}},suffix=-opencode
             type=semver,pattern={{major}}.{{minor}},suffix=-opencode
             type=semver,pattern={{major}},suffix=-opencode
+            type=raw,value=latest-opencode
 
       - name: Build and push Docker image (opencode)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.opencode
           push: true
           tags: ${{ steps.meta-opencode.outputs.tags }}
           labels: ${{ steps.meta-opencode.outputs.labels }}
-          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
