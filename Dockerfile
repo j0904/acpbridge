@@ -19,13 +19,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g opencode-ai
+RUN npm install -g @qwen-code/qwen-code@latest
 
 RUN useradd -r -m -s /bin/bash app
 
 WORKDIR /opt/acpbridge
 
 COPY --from=builder /app/bridge-acp .
+COPY config.json .
 
 RUN chown -R app:app /opt/acpbridge
 
