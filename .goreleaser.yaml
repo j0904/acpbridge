@@ -1,0 +1,208 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+version: 2
+
+git:
+  ignore_tags:
+    - nightly
+    - ".*-nightly.*"
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: bridge-acp-linux-amd64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - amd64
+    main: ./cmd/bridge-acp
+
+  - id: bridge-acp-linux-arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+    goarch:
+      - arm64
+    main: ./cmd/bridge-acp
+
+  - id: bridge-acp-windows-amd64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+    goos:
+      - windows
+    goarch:
+      - amd64
+    main: ./cmd/bridge-acp
+
+  - id: bridge-acp-darwin-amd64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+    goos:
+      - darwin
+    goarch:
+      - amd64
+    main: ./cmd/bridge-acp
+
+  - id: bridge-acp-darwin-arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    main: ./cmd/bridge-acp
+
+archives:
+  - id: bridge-acp
+    ids:
+      - bridge-acp-linux-amd64
+      - bridge-acp-linux-arm64
+      - bridge-acp-windows-amd64
+      - bridge-acp-darwin-amd64
+      - bridge-acp-darwin-arm64
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+dockers:
+  - id: bridge-acp-amd64
+    goos: linux
+    goarch: amd64
+    use: buildx
+    dockerfile: docker/Dockerfile.goreleaser
+    image_templates:
+      - "ghcr.io/j0904/acpbridge:{{ .Tag }}-amd64"
+      - "ghcr.io/j0904/acpbridge:latest-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description={{ .ProjectName }} - ACP Bridge"
+      - "--label=org.opencontainers.image.url=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ time \"2006-01-02T15:04:05Z07:00\" }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+    extra_files:
+      - config.json
+
+  - id: bridge-acp-arm64
+    goos: linux
+    goarch: arm64
+    use: buildx
+    dockerfile: docker/Dockerfile.goreleaser
+    image_templates:
+      - "ghcr.io/j0904/acpbridge:{{ .Tag }}-arm64"
+      - "ghcr.io/j0904/acpbridge:latest-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description={{ .ProjectName }} - ACP Bridge"
+      - "--label=org.opencontainers.image.url=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ time \"2006-01-02T15:04:05Z07:00\" }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+    extra_files:
+      - config.json
+
+  - id: bridge-acp-opencode-amd64
+    goos: linux
+    goarch: amd64
+    use: buildx
+    dockerfile: docker/Dockerfile.goreleaser-opencode
+    image_templates:
+      - "ghcr.io/j0904/acpbridge:{{ .Tag }}-opencode-amd64"
+      - "ghcr.io/j0904/acpbridge:latest-opencode-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description={{ .ProjectName }} - ACP Bridge (OpenCode)"
+      - "--label=org.opencontainers.image.url=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ time \"2006-01-02T15:04:05Z07:00\" }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+    extra_files:
+      - config.opencode.json:config.json
+
+  - id: bridge-acp-opencode-arm64
+    goos: linux
+    goarch: arm64
+    use: buildx
+    dockerfile: docker/Dockerfile.goreleaser-opencode
+    image_templates:
+      - "ghcr.io/j0904/acpbridge:{{ .Tag }}-opencode-arm64"
+      - "ghcr.io/j0904/acpbridge:latest-opencode-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description={{ .ProjectName }} - ACP Bridge (OpenCode)"
+      - "--label=org.opencontainers.image.url=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPOSITORY }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ time \"2006-01-02T15:04:05Z07:00\" }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+    extra_files:
+      - config.opencode.json:config.json
+
+docker_manifests:
+  - name_template: "ghcr.io/j0904/acpbridge:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/j0904/acpbridge:{{ .Tag }}-amd64"
+      - "ghcr.io/j0904/acpbridge:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/j0904/acpbridge:latest"
+    image_templates:
+      - "ghcr.io/j0904/acpbridge:latest-amd64"
+      - "ghcr.io/j0904/acpbridge:latest-arm64"
+  - name_template: "ghcr.io/j0904/acpbridge:{{ .Tag }}-opencode"
+    image_templates:
+      - "ghcr.io/j0904/acpbridge:{{ .Tag }}-opencode-amd64"
+      - "ghcr.io/j0904/acpbridge:{{ .Tag }}-opencode-arm64"
+  - name_template: "ghcr.io/j0904/acpbridge:latest-opencode"
+    image_templates:
+      - "ghcr.io/j0904/acpbridge:latest-opencode-amd64"
+      - "ghcr.io/j0904/acpbridge:latest-opencode-arm64"
+
+release:
+  disable: '{{ isEnvSet "NIGHTLY_BUILD" }}'
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).

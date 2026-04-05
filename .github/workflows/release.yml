@@ -1,55 +1,77 @@
-name: Release
+name: Create Tag and Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (required, e.g. v0.2.0)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: "Create as draft"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
-  build:
-    name: Build and Release
+  create-tag:
+    name: Create Git Tag
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Create and push tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+          git push origin "$RELEASE_TAG"
+
+  release:
+    name: GoReleaser Release
+    needs: create-tag
+    if: always() && (needs.create-tag.result == 'success' || needs.create-tag.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
       id-token: write
       attestations: write
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Setup Go from go.mod
+        id: setup-go
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
-      - name: Build Windows (amd64)
-        run: GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bridge-acp-windows-amd64.exe ./cmd/bridge-acp
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
 
-      - name: Build Windows (arm64)
-        run: GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o bridge-acp-windows-arm64.exe ./cmd/bridge-acp
-
-      - name: Build Linux (amd64)
-        run: GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bridge-acp-linux-amd64 ./cmd/bridge-acp
-
-      - name: Build macOS (amd64)
-        run: GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o bridge-acp-darwin-amd64 ./cmd/bridge-acp
-
-      - name: Build macOS (arm64)
-        run: GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bridge-acp-darwin-arm64 ./cmd/bridge-acp
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            bridge-acp-windows-amd64.exe
-            bridge-acp-windows-arm64.exe
-            bridge-acp-linux-amd64
-            bridge-acp-darwin-amd64
-            bridge-acp-darwin-arm64
-            config.example.json
-          generate_release_notes: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
@@ -58,25 +80,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get version
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: ~> v2
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GOVERSION: ${{ steps.setup-go.outputs.go-version }}
 
-      - name: Build and push default image
+      - name: Apply release flags
+        shell: bash
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          docker build \
-            -t ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }} \
-            -t ghcr.io/${{ github.repository }}:latest \
-            .
-          docker push ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
-          docker push ghcr.io/${{ github.repository }}:latest
+          gh release edit "${{ inputs.tag }}" \
+            --draft=${{ inputs.draft }} \
+            --prerelease=${{ inputs.prerelease }}
 
-      - name: Build and push opencode image
+      - name: Set release notes for tag push
+        shell: bash
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          docker build \
-            -f Dockerfile.opencode \
-            -t ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}-opencode \
-            -t ghcr.io/${{ github.repository }}:latest-opencode \
-            .
-          docker push ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}-opencode
-          docker push ghcr.io/${{ github.repository }}:latest-opencode
+          gh release edit "$RELEASE_TAG" \
+            --draft=false \
+            --prerelease=false
