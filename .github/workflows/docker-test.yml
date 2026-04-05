@@ -1,0 +1,25 @@
+name: Docker Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  test:
+    name: Docker Push Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build
+        run: docker build -t ghcr.io/j0904/acpbridge:test-manual .
+
+      - name: Push
+        run: docker push ghcr.io/j0904/acpbridge:test-manual
