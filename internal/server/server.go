@@ -68,7 +68,27 @@ func (s *Server) setupRoutes() {
 
 // handleHealth handles health check requests
 func (s *Server) handleHealth(c *gin.Context) {
-	c.JSON(http.StatusOK, types.HealthResponse{Status: "ok"})
+	driver := s.cfg.Driver
+	if driver == "" {
+		driver = "qwen"
+	}
+
+	health := gin.H{
+		"status":  "ok",
+		"driver":  driver,
+		"session": "active",
+	}
+
+	// Check if session is still alive
+	if s.session == nil {
+		health["status"] = "error"
+		health["session"] = "not initialized"
+		c.JSON(http.StatusServiceUnavailable, health)
+		return
+	}
+
+	// Try to access session state - if the process died, this will tell us
+	c.JSON(http.StatusOK, health)
 }
 
 // handleChat handles synchronous chat requests
@@ -82,8 +102,9 @@ func (s *Server) handleChat(c *gin.Context) {
 	// Build prompt from messages
 	prompt := buildPrompt(req.Messages, req.Message)
 
-	// Send to ACP
-	ctx := c.Request.Context()
+	// Apply request-level timeout.
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+	defer cancel()
 	response, err := s.session.Prompt(ctx, prompt, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -92,7 +113,7 @@ func (s *Server) handleChat(c *gin.Context) {
 
 	c.JSON(http.StatusOK, types.ChatResponse{
 		Reply:  response,
-		Tokens: len([]rune(response)) / 4, // Rough estimate
+		Tokens: len([]rune(response)) / 4,
 		Model:  s.cfg.Model,
 	})
 }
@@ -118,8 +139,9 @@ func (s *Server) handleChatStream(c *gin.Context) {
 	var chunks []string
 	var mu syncMutex
 
-	// Send to ACP with chunk handler
-	ctx := c.Request.Context()
+	// Apply request-level timeout.
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+	defer cancel()
 	_, err := s.session.Prompt(ctx, prompt, func(chunk string) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -157,7 +179,9 @@ func (s *Server) handleOpenAIChat(c *gin.Context) {
 		var content string
 		var mu syncMutex
 
-		ctx := c.Request.Context()
+		// Apply request-level timeout to prevent indefinite hangs.
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+		defer cancel()
 		_, err := s.session.Prompt(ctx, prompt, func(chunk string) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -205,8 +229,9 @@ func (s *Server) handleOpenAIChat(c *gin.Context) {
 		return
 	}
 
-	// Synchronous response
-	ctx := c.Request.Context()
+	// Synchronous response - apply request-level timeout.
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+	defer cancel()
 	response, err := s.session.Prompt(ctx, prompt, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,10 +21,13 @@ import (
 // Session represents an ACP session
 type Session struct {
 	mu            sync.Mutex
+	restartMu     sync.Mutex
 	cmd           *exec.Cmd
 	stdin         io.WriteCloser
 	reader        *bufio.Reader
 	sessionID     string
+	command       string
+	args          []string
 	workspace     string
 	requestID     int64
 	done          chan struct{}
@@ -37,6 +41,8 @@ type Session struct {
 func NewSession(command string, args []string, workspace string) (*Session, error) {
 	s := &Session{
 		workspace:     workspace,
+		command:       command,
+		args:          args,
 		done:          make(chan struct{}),
 		notifications: make(chan *Notification, 100),
 		pending:       make(map[int64]chan *Envelope),
@@ -122,12 +128,10 @@ func (s *Session) startProcess(command string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get stderr pipe: %w", err)
 	}
+	// Use io.Copy instead of bufio.Scanner to avoid 64KB line limit
+	// that causes silent failure and pipe backpressure.
 	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			// stderr from qwen process — uncomment for debugging:
-			// fmt.Fprintf(os.Stderr, "[qwen] %s\n", scanner.Text())
-		}
+		_, _ = io.Copy(io.Discard, stderr)
 	}()
 
 	if err := s.cmd.Start(); err != nil {
@@ -182,7 +186,8 @@ func (s *Session) createSession() error {
 	return nil
 }
 
-// Prompt sends a prompt to the ACP session and returns the response
+// Prompt sends a prompt to the ACP session and returns the response.
+// If the subprocess is unresponsive, it will be automatically restarted.
 func (s *Session) Prompt(ctx context.Context, prompt string, onChunk func(string)) (string, error) {
 	s.mu.Lock()
 	if s.sessionID == "" {
@@ -191,8 +196,55 @@ func (s *Session) Prompt(ctx context.Context, prompt string, onChunk func(string
 	}
 	s.mu.Unlock()
 
+	return s.doPrompt(ctx, prompt, onChunk, false)
+}
+
+// doPrompt performs the prompt with auto-restart on failure.
+func (s *Session) doPrompt(ctx context.Context, prompt string, onChunk func(string), retried bool) (string, error) {
+	result, err := s.doPromptOnce(ctx, prompt, onChunk)
+	if err != nil {
+		// If we haven't retried yet and the error suggests process failure, restart.
+		if !retried && shouldRestartOnError(err) {
+			fmt.Fprintf(os.Stderr, "[bridge-acp] qwen process unresponsive, restarting...\n")
+			if restartErr := s.Restart(); restartErr != nil {
+				return "", fmt.Errorf("failed to restart process: %w (original: %v)", restartErr, err)
+			}
+			fmt.Fprintf(os.Stderr, "[bridge-acp] qwen process restarted successfully\n")
+
+			// If the request already hit its deadline, fail this call but keep the
+			// bridge healthy for the next request.
+			if errors.Is(err, context.DeadlineExceeded) {
+				return "", err
+			}
+
+			// Retry once for transport-style failures (EOF/broken pipe/session closed).
+			return s.doPrompt(ctx, prompt, onChunk, true)
+		}
+	}
+	return result, err
+}
+
+func shouldRestartOnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "session closed") ||
+		strings.Contains(msg, "EOF") ||
+		strings.Contains(msg, "broken pipe")
+}
+
+// doPromptOnce performs a single prompt attempt without restart logic.
+func (s *Session) doPromptOnce(ctx context.Context, prompt string, onChunk func(string)) (string, error) {
+	s.mu.Lock()
+	sessionID := s.sessionID
+	s.mu.Unlock()
+
 	params := map[string]interface{}{
-		"sessionId": s.sessionID,
+		"sessionId": sessionID,
 		"prompt": []interface{}{
 			map[string]interface{}{
 				"type": "text",
@@ -261,6 +313,58 @@ func (s *Session) Prompt(ctx context.Context, prompt string, onChunk func(string
 	result := strings.Join(parts, "")
 	partsMu.Unlock()
 	return result, err
+}
+
+// Restart kills the current subprocess and starts a new one with full re-initialization.
+func (s *Session) Restart() error {
+	s.restartMu.Lock()
+	defer s.restartMu.Unlock()
+
+	// Snapshot current process handles under lock.
+	s.mu.Lock()
+	oldCmd := s.cmd
+	oldStdin := s.stdin
+	s.mu.Unlock()
+
+	// Stop current process outside lock to avoid blocking other paths.
+	s.closeOnce.Do(func() { close(s.done) })
+	if oldStdin != nil {
+		_ = oldStdin.Close()
+	}
+	if oldCmd != nil && oldCmd.Process != nil {
+		_ = oldCmd.Process.Kill()
+		_, _ = oldCmd.Process.Wait()
+	}
+
+	// Reset mutable state under lock.
+	s.mu.Lock()
+	s.done = make(chan struct{})
+	s.closeOnce = sync.Once{}
+	s.sessionID = ""
+	s.requestID = 0
+	s.pending = make(map[int64]chan *Envelope)
+	s.notifications = make(chan *Notification, 100)
+	s.err = nil
+	s.mu.Unlock()
+
+	// Start and initialize fresh process without holding s.mu.
+	if err := s.startProcess(s.command, s.args); err != nil {
+		return fmt.Errorf("failed to start process: %w", err)
+	}
+
+	go s.readLoop()
+
+	if err := s.initialize(); err != nil {
+		s.Close()
+		return fmt.Errorf("failed to initialize: %w", err)
+	}
+
+	if err := s.createSession(); err != nil {
+		s.Close()
+		return fmt.Errorf("failed to create session: %w", err)
+	}
+
+	return nil
 }
 
 // sendRequest sends a JSON-RPC request and waits for the response via readLoop.
