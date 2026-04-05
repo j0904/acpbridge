@@ -16,7 +16,7 @@ RUN useradd -r -m -s /bin/bash app
 WORKDIR /opt/acpbridge
 
 COPY bridge-acp .
-COPY config.json .
+COPY config.opencode.json config.json
 
 RUN chown -R app:app /opt/acpbridge
 
