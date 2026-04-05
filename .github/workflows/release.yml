@@ -76,7 +76,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -96,7 +96,7 @@ jobs:
             type=raw,value=latest-opencode
 
       - name: Build and push Docker image (opencode)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.opencode
