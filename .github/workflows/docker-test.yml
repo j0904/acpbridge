@@ -15,12 +15,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check token permissions
+        run: |
+          echo "Token scopes check via GitHub API:"
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/user -o /dev/null -w "HTTP %{http_code}\n"
+          echo "GITHUB_ACTOR: $GITHUB_ACTOR"
+          echo "REPO: ${{ github.repository }}"
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Build
         run: docker build -t ghcr.io/j0904/acpbridge:test-manual .
