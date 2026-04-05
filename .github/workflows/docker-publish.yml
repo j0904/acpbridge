@@ -55,3 +55,25 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
+          provenance: false
+
+      - name: Extract metadata (opencode)
+        id: meta-opencode
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},suffix=-opencode
+            type=semver,pattern={{major}}.{{minor}},suffix=-opencode
+            type=raw,value=latest-opencode
+
+      - name: Build and push (opencode)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.opencode
+          push: true
+          tags: ${{ steps.meta-opencode.outputs.tags }}
+          labels: ${{ steps.meta-opencode.outputs.labels }}
+          platforms: linux/amd64
+          provenance: false
