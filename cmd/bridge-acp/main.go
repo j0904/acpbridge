@@ -36,6 +36,7 @@ func main() {
 	fmt.Printf("Starting bridge-acp server on %s\n", cfg.Listen)
 	fmt.Printf("CLI command: %s %v\n", cfg.CLI.Command, cfg.CLI.Args)
 	fmt.Printf("Workspace: %s\n", cfg.CLI.Workspace)
+	fmt.Printf("Model: %s\n", cfg.Model)
 
 	// Create server
 	srv, err := server.New(cfg)

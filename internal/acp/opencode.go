@@ -36,6 +36,7 @@ type OpenCodeSession struct {
 	baseURL   string
 	sessionID string
 	workspace string
+	model    string
 	done      chan struct{}
 	closeOnce sync.Once
 	client    *http.Client
@@ -81,7 +82,7 @@ type ocErrorProps struct {
 }
 
 // NewOpenCodeSession starts opencode acp and returns a ready session.
-func NewOpenCodeSession(command string, args []string, workspace string) (*OpenCodeSession, error) {
+func NewOpenCodeSession(command string, args []string, workspace string, model string) (*OpenCodeSession, error) {
 	// Expand ~ in workspace path
 	if strings.HasPrefix(workspace, "~/") {
 		home, err := os.UserHomeDir()
@@ -105,6 +106,7 @@ func NewOpenCodeSession(command string, args []string, workspace string) (*OpenC
 		port:      port,
 		baseURL:   fmt.Sprintf("http://127.0.0.1:%d", port),
 		workspace: workspace,
+		model:    model,
 		done:      make(chan struct{}),
 		client:    &http.Client{Timeout: 0}, // no timeout for SSE
 	}
@@ -186,7 +188,8 @@ func (s *OpenCodeSession) createSession() error {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	body := fmt.Sprintf(`{"projectPath":%q}`, cwd)
+	// Include model in session creation if specified
+	body := fmt.Sprintf(`{"projectPath":%q,"model":%q}`, cwd, s.model)
 	resp, err := s.post("/session", body)
 	if err != nil {
 		return err

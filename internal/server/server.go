@@ -36,7 +36,7 @@ func New(cfg *config.Config) (*Server, error) {
 	var err error
 	switch strings.ToLower(cfg.Driver) {
 	case "opencode":
-		s.session, err = acp.NewOpenCodeSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace)
+		s.session, err = acp.NewOpenCodeSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace, cfg.Model)
 	default: // "qwen" or empty
 		s.session, err = acp.NewSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace)
 	}
@@ -170,6 +170,12 @@ func (s *Server) handleOpenAIChat(c *gin.Context) {
 	// Build prompt from OpenAI messages
 	prompt := buildPrompt(req.Messages, "")
 
+	// Use request model or fall back to config default
+	model := req.Model
+	if model == "" {
+		model = s.cfg.Model
+	}
+
 	if req.Stream {
 		// Streaming response
 		c.Header("Content-Type", "text/event-stream")
@@ -191,7 +197,7 @@ func (s *Server) handleOpenAIChat(c *gin.Context) {
 				ID:      "chatcmpl-" + time.Now().Format("20060102150405"),
 				Object:  "chat.completion.chunk",
 				Created: time.Now().Unix(),
-				Model:   req.Model,
+				Model:   model,
 				Choices: []types.StreamChoice{
 					{
 						Index: 0,
@@ -216,7 +222,7 @@ func (s *Server) handleOpenAIChat(c *gin.Context) {
 			ID:      "chatcmpl-" + time.Now().Format("20060102150405"),
 			Object:  "chat.completion.chunk",
 			Created: time.Now().Unix(),
-			Model:   req.Model,
+			Model:   model,
 			Choices: []types.StreamChoice{
 				{
 					Index:        0,
@@ -242,7 +248,7 @@ func (s *Server) handleOpenAIChat(c *gin.Context) {
 		ID:      "chatcmpl-" + time.Now().Format("20060102150405"),
 		Object:  "chat.completion",
 		Created: time.Now().Unix(),
-		Model:   req.Model,
+		Model:   model,
 		Choices: []types.Choice{
 			{
 				Index: 0,
