@@ -224,31 +224,31 @@ deploy_acpbridge() {
 EOFCONFIG
     chmod 777 ~/.picoclaw/config.json
 
-    # Generate correct docker-compose.yml
+    # Generate correct docker-compose.yml matching running config
     sudo tee docker-compose.yml > /dev/null <<DCYML
 services:
   acpbridge:
     image: ghcr.io/j0904/acpbridge:bufio-fix
     container_name: acpbridge
-    command: --config /opt/acpbridge/config.json
     ports:
       - "9090:9090"
     volumes:
       - ./config.opencode.json:/opt/acpbridge/config.json
-      - ${SSH_HOME}/opencode-ws:/home/app/.picoclaw/opencode-ws
-      - ${SSH_HOME}/.picoclaw/config.json:/home/app/.picoclaw/config.json
-      - ${SSH_HOME}/.qwen:/home/app/.qwen
-      - /usr/lib/node_modules/opencode-ai/bin/.opencode:/usr/bin/.opencode:ro
+      - /home/ubuntu/opencode-ws:/home/app/.picoclaw/opencode-ws
+      - /usr/local/lib/node_modules/opencode-ai/bin/opencode.exe:/usr/bin/.opencode:ro
+      - /usr/local/lib/node_modules/opencode-ai:/usr/lib/node_modules/opencode-ai:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/health > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - acpbridge-net
 
 networks:
   acpbridge-net:
     driver: bridge
-
-volumes:
-  caddy_data:
-  caddy_config:
 DCYML
 
     echo "docker-compose.yml written."
