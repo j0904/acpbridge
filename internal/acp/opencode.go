@@ -189,8 +189,11 @@ func (s *OpenCodeSession) createSession() error {
 		cwd, _ = os.Getwd()
 	}
 	// opencode serve (1.15.3) rejects "model" in session body
+	// Use a 15s timeout to prevent hanging when opencode is in a bad state.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 	body := fmt.Sprintf(`{"projectPath":%q}`, cwd)
-	resp, err := s.post("/session", body)
+	resp, err := s.postWithContext(ctx, "/session", body)
 	if err != nil {
 		return err
 	}
@@ -264,6 +267,17 @@ func (s *OpenCodeSession) collectSSE(ctx context.Context) (<-chan string, <-chan
 	errCh := make(chan error, 1)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				buf := make([]byte, 4096)
+				n := runtime.Stack(buf, false)
+				fmt.Fprintf(os.Stderr, "panic in collectSSE: %v\n%s", r, buf[:n])
+				select {
+				case errCh <- fmt.Errorf("collectSSE panic: %v", r):
+				default:
+				}
+			}
+		}()
 		defer close(parts)
 
 		req, _ := http.NewRequestWithContext(ctx, "GET", s.baseURL+"/global/event", nil)

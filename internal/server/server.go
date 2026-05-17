@@ -36,7 +36,7 @@ func New(cfg *config.Config) (*Server, error) {
 	var err error
 	switch strings.ToLower(cfg.Driver) {
 	case "opencode":
-		s.session, err = acp.NewOpenCodeSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace, cfg.Model)
+		s.session, err = acp.NewAcpNativeSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace, cfg.Model)
 	default: // "qwen" or empty
 		s.session, err = acp.NewSession(cfg.CLI.Command, cfg.CLI.Args, cfg.CLI.Workspace)
 	}
@@ -181,6 +181,8 @@ func (s *Server) handleOpenAIChat(c *gin.Context) {
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
+		c.Status(http.StatusOK)
+		c.Writer.Flush()
 
 		var content string
 		var mu syncMutex
