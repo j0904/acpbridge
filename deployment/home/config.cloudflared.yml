@@ -1,0 +1,7 @@
+tunnel: europa-acpbridge
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: weuropallm.bigt.ai
+    service: http://caddy:80
+  - service: http_status:404

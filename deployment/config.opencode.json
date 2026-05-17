@@ -1,0 +1,11 @@
+{
+  "listen": ":9090",
+  "api_key": "eu2-8a9f-1c3b-4d5e-9f0a-123456789abc",
+  "driver": "opencode",
+  "cli": {
+    "command": ".opencode",
+    "args": [],
+    "workspace": "/home/app/.picoclaw/opencode-ws"
+  },
+  "model": "opencode/deepseek-v4-flash-free"
+}

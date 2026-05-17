@@ -1,8 +1,5 @@
 .git
 .github
-internal
-cmd
-pkg
 *.md
-go.*
+bridge-acp
 Dockerfile

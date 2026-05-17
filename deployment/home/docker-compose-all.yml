@@ -1,0 +1,38 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - acpbridge-net
+
+  acpbridge:
+    image: ghcr.io/j0904/acpbridge:latest
+    container_name: acpbridge
+    ports:
+      - "9091:9091"
+    volumes:
+      - /home/ubuntu/.qwen:/home/app/.qwen
+      - /home/ubuntu/qwen-ws:/home/app/.picoclaw/qwen-ws
+    networks:
+      - acpbridge-net
+  acpbridge-opencode:
+    image: ghcr.io/j0904/acpbridge:latest-opencode
+    container_name: acpbridge-opencode
+    ports:
+      - "9090:9090"
+    networks:
+      - acpbridge-net
+networks:
+  acpbridge-net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

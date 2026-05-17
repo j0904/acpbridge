@@ -1,0 +1,3 @@
+eu1.llm.bigt.ai {
+    reverse_proxy acpbridge:9090
+}

@@ -1,0 +1,23 @@
+services:
+  acpbridge:
+    image: ghcr.io/j0904/acpbridge:bufio-fix
+    container_name: acpbridge
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config.opencode.json:/opt/acpbridge/config.json
+      - /home/ubuntu/opencode-ws:/home/app/.picoclaw/opencode-ws
+      - /usr/local/lib/node_modules/opencode-ai/bin/opencode.exe:/usr/bin/.opencode:ro
+      - /usr/local/lib/node_modules/opencode-ai:/usr/lib/node_modules/opencode-ai:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/health > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - acpbridge-net
+
+networks:
+  acpbridge-net:
+    driver: bridge

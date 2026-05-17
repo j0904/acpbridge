@@ -188,8 +188,8 @@ func (s *OpenCodeSession) createSession() error {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	// Include model in session creation if specified
-	body := fmt.Sprintf(`{"projectPath":%q,"model":%q}`, cwd, s.model)
+	// opencode serve (1.15.3) rejects "model" in session body
+	body := fmt.Sprintf(`{"projectPath":%q}`, cwd)
 	resp, err := s.post("/session", body)
 	if err != nil {
 		return err
@@ -276,6 +276,9 @@ func (s *OpenCodeSession) collectSSE(ctx context.Context) (<-chan string, <-chan
 		defer resp.Body.Close()
 
 		scanner := bufio.NewScanner(resp.Body)
+		// Increase buffer to 5MB to avoid "bufio.Scanner: token too long" errors
+		// when reading large SSE events from opencode CLI responses
+		scanner.Buffer(make([]byte, 0, 5*1024*1024), 5*1024*1024)
 		var dataBuf bytes.Buffer
 
 		// Track accumulated text per part ID so we can emit incremental chunks.
